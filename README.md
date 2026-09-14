@@ -1,4 +1,4 @@
-# Mirador
+# Mirador [![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges)
 
 An external Omarchy Shell plugin that presents a fullscreen overview of
 workspaces and their windows. It supports keyboard navigation, window
