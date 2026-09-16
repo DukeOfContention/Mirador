@@ -8,7 +8,10 @@ and dragging windows between workspaces.
 
 
 
-https://github.com/user-attachments/assets/ea80d328-4e02-4a49-9d36-7638c6312665
+
+
+https://github.com/user-attachments/assets/c9c949c1-85ca-4352-8a1d-9c6ace37502c
+
 
 
 ## Install
