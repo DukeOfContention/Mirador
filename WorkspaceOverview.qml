@@ -116,20 +116,6 @@ Item {
     }
   }
 
-  // Hyprland launches compositor bindings asynchronously. A fast Super
-  // release can otherwise dismiss the carousel before an addressed action
-  // such as Super+Shift+5 reaches this plugin, causing the command to fall
-  // back to Hyprland's stale active window. Keep the explicit selection alive
-  // briefly, then perform the normal release-to-commit behavior.
-  Timer {
-    id: cycleReleaseCommitTimer
-    interval: 250
-    repeat: false
-    onTriggered: {
-      if (root.opened && root.keybindMode === "cycle") root.activateSelectedCard()
-    }
-  }
-
   function isSummoningModifier(key) {
     if (root.activeCycleModifier === Qt.MetaModifier) {
       return key === Qt.Key_Meta || key === Qt.Key_Super_L || key === Qt.Key_Super_R
@@ -969,7 +955,7 @@ Item {
       if (ws) ws.activate()
       else root.dispatchWorkspace(workspaceId)
     }
-    Qt.callLater(root.dismiss)
+    root.dismiss()
   }
 
   function normalizedAddress(toplevel) {
@@ -1042,6 +1028,22 @@ Item {
         payload = payloadJson
     } catch (e) {
       payload = null
+    }
+
+    // Global compositor bindings can be consumed before an exclusive
+    // layer-shell client receives the matching key event. Route numeric
+    // workspace navigation through IPC so carousel selection is deterministic,
+    // while retaining normal desktop workspace switching when Mirador is shut.
+    if (payload && payload.action === "navigateWorkspace") {
+      var workspaceTarget = Number(payload.workspace)
+      if (!isFinite(workspaceTarget) || workspaceTarget < 1 || workspaceTarget > 10
+          || Math.floor(workspaceTarget) !== workspaceTarget) return
+      if (root.opened) {
+        root.navigateToWorkspaceNumber(workspaceTarget)
+      } else {
+        root.dispatchWorkspace(workspaceTarget)
+      }
+      return
     }
 
     // Compositor close bindings are consumed before an exclusive layer-shell
@@ -1146,7 +1148,6 @@ Item {
     root.wheelDeltaAccumulatorY = 0
     root.cycled = false
     holdWatchdog.stop()
-    cycleReleaseCommitTimer.stop()
 
     if (isCycleInvocation) {
       root.keybindMode = "cycle"
@@ -1220,7 +1221,6 @@ Item {
     root.cycled = false
     root.activeCycleModifier = 0
     holdWatchdog.stop()
-    cycleReleaseCommitTimer.stop()
     root.demoMode = false
     root.draggedToplevel = null
     root.selectedCardIndex = -1
@@ -1247,7 +1247,6 @@ Item {
     root.cycled = false
     root.activeCycleModifier = 0
     holdWatchdog.stop()
-    cycleReleaseCommitTimer.stop()
     root.demoMode = false
     root.draggedToplevel = null
     root.selectedCardIndex = -1
@@ -1666,7 +1665,7 @@ Item {
         holdWatchdog.stop()
         if (!root.carouselAddressedActionHandled) root.rememberPendingCarouselWindow()
         root.carouselAddressedActionHandled = false
-        cycleReleaseCommitTimer.restart()
+        root.activateSelectedCard()
         event.accepted = true
       }
 
