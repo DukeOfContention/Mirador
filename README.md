@@ -19,11 +19,74 @@ Install through Omarchy:
 omarchy plugin add https://github.com/sanjyay/Mirador.git
 ```
 
-## Optional background blur
+### Add the keyboard bindings
 
-Mirador provides a transparent LayerShell surface with the namespace
-`omarchy-workspace-overview`. Background blur is performed by Hyprland, not by
-Mirador itself, and is not enabled automatically when the plugin is installed.
+```lua
+-- Super+Tab — carousel cycle
+hl.unbind("SUPER + TAB")
+hl.unbind("SUPER + SHIFT + TAB")
+
+o.bind("SUPER + TAB", "Workspace carousel next", "mirador --cycle-next")
+o.bind("SUPER + SHIFT + TAB", "Workspace carousel prev", "mirador --cycle-prev")
+
+-- Alt+Tab — full overview cycle (release Alt to select)
+hl.unbind("ALT + TAB")
+hl.unbind("ALT + SHIFT + TAB")
+o.bind("ALT + TAB", "Workspace overview next",
+  [[omarchy-shell shell summon mirador '{"step":1,"modifier":"alt","cycleUI":"full","keybindMode":"cycle"}']])
+o.bind("ALT + SHIFT + TAB", "Workspace overview prev",
+  [[omarchy-shell shell summon mirador '{"step":-1,"modifier":"alt","cycleUI":"full","keybindMode":"cycle"}']])
+
+-- Required for closing the highlighted window while Mirador owns exclusive
+-- keyboard focus. Outside Mirador this retains the normal close behavior.
+hl.unbind("SUPER + W")
+o.bind("SUPER + W", "Close window", "mirador --close-window")
+
+-- Inside the carousel these select a window by its rendered position.
+-- Outside Mirador they retain Hyprland's normal directional focus behavior.
+hl.unbind("SUPER + LEFT")
+hl.unbind("SUPER + RIGHT")
+hl.unbind("SUPER + UP")
+hl.unbind("SUPER + DOWN")
+o.bind("SUPER + LEFT", "Focus left window", "mirador --window-left")
+o.bind("SUPER + RIGHT", "Focus right window", "mirador --window-right")
+o.bind("SUPER + UP", "Focus upper window", "mirador --window-up")
+o.bind("SUPER + DOWN", "Focus lower window", "mirador --window-down")
+
+-- Navigate to workspaces 1-10, or move the highlighted carousel window.
+-- Outside Mirador, switch workspaces or move the active window and follow it.
+for workspace = 1, 10 do
+  local key = workspace == 10 and "0" or tostring(workspace)
+  local keycode = "code:" .. tostring(workspace + 9)
+  hl.unbind("SUPER + " .. key)
+  hl.unbind("SUPER + " .. keycode)
+  hl.unbind("SUPER + SHIFT + " .. key)
+  hl.unbind("SUPER + SHIFT + " .. keycode)
+  o.bind("SUPER + " .. keycode, "Navigate Mirador to workspace " .. workspace,
+    "mirador --workspace " .. workspace)
+  o.bind("SUPER + SHIFT + " .. keycode, "Move selected Mirador window to workspace " .. workspace,
+    "mirador --move-window-to-workspace " .. workspace)
+end
+
+-- Shift+Tab — full overview
+hl.unbind("SHIFT + TAB")
+o.bind("SHIFT + TAB", "Workspace full overview", "mirador --full")
+```
+
+The numeric bindings are required for reliable carousel selection and addressed
+window movement: Hyprland can consume its native shortcuts before Mirador sees
+them. Keycodes 10–19 match Omarchy's number-row bindings; `0` selects workspace 10.
+Add this block only once. Do not also load `mirador.bindings.lua`, which defines
+the same close, arrow, and numeric bindings.
+
+Reload Hyprland and confirm that the configuration is valid:
+
+```bash
+hyprctl reload
+hyprctl configerrors
+```
+
+## Optional background blur
 
 Current Omarchy installations may have Hyprland's global blur engine disabled.
 To enable Mirador blur, add the following to a user-owned Hyprland Lua config,
@@ -245,55 +308,11 @@ o.bind(
 )
 ```
 
-### v2.3 bindings: Carousel cycle + Shift+Tab full overview
+### Carousel and full overview bindings
 
-Add these to `~/.config/hypr/bindings.lua` to use the v2.3 carousel and Shift+Tab full overview:
-
-```lua
--- Super+Tab — carousel cycle
-hl.unbind("SUPER + TAB")
-hl.unbind("SUPER + SHIFT + TAB")
-
-o.bind("SUPER + TAB", "Workspace carousel next", "mirador --cycle-next")
-o.bind("SUPER + SHIFT + TAB", "Workspace carousel prev", "mirador --cycle-prev")
-
--- Required for closing the highlighted window while Mirador owns exclusive
--- keyboard focus. Outside Mirador this retains the normal close behavior.
-hl.unbind("SUPER + W")
-o.bind("SUPER + W", "Close window", "mirador --close-window")
-
--- Inside the carousel these select a window by its rendered position.
--- Outside Mirador they retain Hyprland's normal directional focus behavior.
-hl.unbind("SUPER + LEFT")
-hl.unbind("SUPER + RIGHT")
-hl.unbind("SUPER + UP")
-hl.unbind("SUPER + DOWN")
-o.bind("SUPER + LEFT", "Focus left window", "mirador --window-left")
-o.bind("SUPER + RIGHT", "Focus right window", "mirador --window-right")
-o.bind("SUPER + UP", "Focus upper window", "mirador --window-up")
-o.bind("SUPER + DOWN", "Focus lower window", "mirador --window-down")
-
--- Move the highlighted carousel window to workspaces 1-10. Outside Mirador,
--- these preserve Omarchy's normal move-and-follow behavior.
-for workspace = 1, 10 do
-  local key = workspace == 10 and "0" or tostring(workspace)
-  local keycode = "code:" .. tostring(workspace + 9)
-  hl.unbind("SUPER + SHIFT + " .. key)
-  hl.unbind("SUPER + SHIFT + " .. keycode)
-  o.bind("SUPER + SHIFT + " .. keycode, "Move selected Mirador window to workspace " .. workspace,
-    "mirador --move-window-to-workspace " .. workspace)
-end
-
--- Shift+Tab — full overview
-o.bind("SHIFT + TAB", "Workspace full overview", "mirador --full")
-```
-
-The close override is required because Hyprland executes and consumes its
-compositor-side close binding before an exclusive layer-shell surface can
-receive `Super+W`. Mirador therefore cannot safely discover and intercept an
-arbitrary existing close binding from QML. You can alternatively load the
-included [`mirador.bindings.lua`](mirador.bindings.lua) after the default
-Omarchy bindings.
+Use the complete [installation binding block](#add-the-keyboard-bindings) above
+for Super+Tab, Alt+Tab, window selection/closing, and numeric workspace actions.
+Do not add a second copy here.
 
 ### Changing the keyboard binding
 
