@@ -125,7 +125,7 @@ hyprctl configerrors
 ## What's new
 
 <details>
-<summary><b>Version 2.3 — click to reveal all changes</b></summary>
+<summary><b>Version 2.3.0 — click to reveal all changes</b></summary>
 
 ### Carousel Cycle View (Super + Tab)
 * **Horizontal workspace strip**: Pressing `Super + Tab` opens a clean horizontal carousel showing only your real open workspaces — no virtual or duplicate slots.
