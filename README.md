@@ -10,7 +10,13 @@ and dragging windows between workspaces.
 
 
 
-https://github.com/user-attachments/assets/c9c949c1-85ca-4352-8a1d-9c6ace37502c
+
+
+
+
+https://github.com/user-attachments/assets/1c0dc10b-8c8f-4d8f-b4f3-abe63c77f123
+
+
 
 
 
