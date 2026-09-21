@@ -18,6 +18,23 @@ function snapToDevicePixels(value, dpr) {
   return Math.round(num * scale) / scale
 }
 
+// Snap edges together so both boundaries land on physical pixels. Inward
+// snapping is used for the safe viewport; children use nearest-edge snapping.
+function snapRectToDevicePixels(rect, dpr, inward) {
+  var ratio = finiteNumber(dpr) > 0 ? Number(dpr) : 1
+  var left = inward ? Math.ceil(rect.x * ratio) / ratio : rect.x
+  var top = inward ? Math.ceil(rect.y * ratio) / ratio : rect.y
+  var right = inward ? Math.floor((rect.x + rect.width) * ratio) / ratio : rect.x + rect.width
+  var bottom = inward ? Math.floor((rect.y + rect.height) * ratio) / ratio : rect.y + rect.height
+  var x = snapToDevicePixels(left, ratio)
+  var y = snapToDevicePixels(top, ratio)
+  return {
+    x: x, y: y,
+    width: Math.max(0, snapToDevicePixels(right, ratio) - x),
+    height: Math.max(0, snapToDevicePixels(bottom, ratio) - y)
+  }
+}
+
 // Return a nearly edge-to-edge canvas without ever producing negative sizes
 // on extremely small cards. Workspace badges and window title pills overlay
 // this rectangle and therefore do not reduce it.
@@ -100,223 +117,152 @@ function safeAreaGeometry(screenWidth, screenHeight, barPosition, barSize, outer
   }
 }
 
-// Helper to generate balanced row distributions for count items into R rows.
-// For example, count = 5, R = 2 produces [[3, 2], [2, 3]].
-function getBalancedRowDistributions(count, R) {
-  var kHigh = Math.ceil(count / R)
-  var kLow = Math.floor(count / R)
-  var h = count - kLow * R
-  var l = R - h
-
-  if (h === 0) {
-    var single = []
-    for (var i = 0; i < R; i++) single.push(kLow)
-    return [single]
-  }
-
-  // Priority order:
-  // 1. Top-heavy: h high rows, then l low rows (e.g. [2, 1], [3, 2], [3, 2, 2])
-  // 2. Symmetric / centered distributions
-  // 3. Bottom-heavy: l low rows, then h high rows (e.g. [1, 2], [2, 3], [2, 2, 3])
-  var results = []
-  var seen = {}
-
-  function permute(remainingHigh, remainingLow, current) {
-    if (remainingHigh === 0 && remainingLow === 0) {
-      var key = current.join(",")
-      if (!seen[key]) {
-        seen[key] = true
-        results.push(current.slice())
-      }
-      return
-    }
-    if (remainingHigh > 0) {
-      current.push(kHigh)
-      permute(remainingHigh - 1, remainingLow, current)
-      current.pop()
-    }
-    if (remainingLow > 0) {
-      current.push(kLow)
-      permute(remainingHigh, remainingLow - 1, current)
-      current.pop()
-    }
-  }
-
-  permute(h, l, [])
-  return results
-}
-
-// Adaptive equal-size overview layout solver for Normal overview mode.
-// Solves: "What is the largest common workspace-card size that allows all workspaces to fit on screen?"
-// Subject to:
-// - every card has the same width
-// - every card has the same height
-// - workspace aspect ratio is preserved
-// - all cards remain inside the usable viewport
-// - reasonable spacing remains
-// - rows are centered independently
-// - no overlap
-// - no fake empty workspace cells
+// Equal-size overview cards. With previewInset, aspectRatio describes the
+// inner desktop canvas, not the surrounding card. Legacy five/six-argument
+// calls retain their original meaning (zero inset, optional width cap).
 function overviewGridGeometry(count, areaWidth, areaHeight, aspectRatio,
-                              maximumCardWidth, spacing) {
-  var effectiveSpacing = spacing
-  var effectiveMaxWidth = maximumCardWidth
-  if (arguments.length === 5) {
-    effectiveSpacing = maximumCardWidth
-    effectiveMaxWidth = null
-  }
-
+                              maximumCardWidth, spacing, previewInset) {
+  var effectiveSpacing = arguments.length === 5 ? maximumCardWidth : spacing
+  var effectiveMaxWidth = arguments.length === 5 ? null : maximumCardWidth
   var safeCount = Math.max(0, Math.floor(finiteNumber(count) || 0))
   var safeWidth = Math.max(1, finiteNumber(areaWidth) || 1)
   var safeHeight = Math.max(1, finiteNumber(areaHeight) || 1)
   var safeAspect = Math.max(0.01, finiteNumber(aspectRatio) || 1)
-  var gap = Math.max(0, finiteNumber(effectiveSpacing) || 0)
-  var safeMaximumWidth = (effectiveMaxWidth !== undefined && effectiveMaxWidth !== null && finiteNumber(effectiveMaxWidth) > 0)
-    ? Math.max(1, finiteNumber(effectiveMaxWidth))
-    : safeWidth
+  // Leave room for content even when the viewport is smaller than the gaps.
+  var gap = Math.min(Math.max(0, finiteNumber(effectiveSpacing) || 0),
+    Math.min(safeWidth, safeHeight) / (2 * Math.max(1, safeCount - 1)))
+  var requestedInset = Math.max(0, finiteNumber(previewInset) || 0)
+  var safeMaximumWidth = finiteNumber(effectiveMaxWidth) > 0
+    ? Math.max(1, finiteNumber(effectiveMaxWidth)) : safeWidth
 
   if (safeCount === 0) {
     return {
-      columns: 0,
-      rows: 0,
-      cardWidth: 0,
-      cardHeight: 0,
-      gridWidth: 0,
-      gridHeight: 0,
-      x: safeWidth / 2,
-      y: safeHeight / 2,
-      rowDistribution: [],
-      cards: []
-    }
-  }
-
-  if (safeCount === 1) {
-    var singleW = Math.min(safeMaximumWidth, safeWidth, safeHeight * safeAspect)
-    var singleH = singleW / safeAspect
-    var singleX = (safeWidth - singleW) / 2
-    var singleY = (safeHeight - singleH) / 2
-    return {
-      columns: 1,
-      rows: 1,
-      cardWidth: singleW,
-      cardHeight: singleH,
-      gridWidth: singleW,
-      gridHeight: singleH,
-      x: singleX,
-      y: singleY,
-      rowDistribution: [1],
-      cards: [{
-        index: 0,
-        x: singleX,
-        y: singleY,
-        width: singleW,
-        height: singleH,
-        row: 0,
-        col: 0
-      }]
+      columns: 0, rows: 0, cardWidth: 0, cardHeight: 0,
+      gridWidth: 0, gridHeight: 0, x: safeWidth / 2, y: safeHeight / 2,
+      previewWidth: 0, previewHeight: 0, previewInset: 0, spacing: gap,
+      rowDistribution: [], cards: []
     }
   }
 
   var best = null
   var targetAspect = safeWidth / safeHeight
-
-  // Evaluate candidate row counts from 1 up to safeCount
   for (var R = 1; R <= safeCount; R++) {
-    var dists = getBalancedRowDistributions(safeCount, R)
-    for (var d = 0; d < dists.length; d++) {
-      var dist = dists[d]
-      var Cmax = 0
-      for (var k = 0; k < dist.length; k++) {
-        if (dist[k] > Cmax) Cmax = dist[k]
-      }
-      var widthAvailable = safeWidth - gap * (Cmax - 1)
-      var heightAvailable = safeHeight - gap * (R - 1)
-      if (widthAvailable <= 0 || heightAvailable <= 0) continue
+    var Cmax = Math.ceil(safeCount / R)
+    var maxW = Math.min(safeMaximumWidth, (safeWidth - gap * (Cmax - 1)) / Cmax)
+    var maxH = (safeHeight - gap * (R - 1)) / R
+    if (maxW <= 0 || maxH <= 0) continue
 
-      var cardW = Math.min(
-        safeMaximumWidth,
-        widthAvailable / Cmax,
-        (heightAvailable / R) * safeAspect)
-      if (!isFinite(cardW) || cardW <= 0) continue
+    // On tiny viewports reduce chrome before sacrificing the preview canvas.
+    var inset = Math.min(requestedInset, maxW / 4, maxH / 4)
+    var previewW = Math.min(maxW - 2 * inset, (maxH - 2 * inset) * safeAspect)
+    var previewH = previewW / safeAspect
+    var cardW = previewW + 2 * inset
+    var cardH = previewH + 2 * inset
+    var gridW = Cmax * cardW + gap * (Cmax - 1)
+    var gridH = R * cardH + gap * (R - 1)
+    var aspectDiff = Math.abs(gridW / gridH - targetAspect)
+    var candidate = {
+      columns: Cmax, rows: R, cardWidth: cardW, cardHeight: cardH,
+      cardArea: cardW * cardH, gridWidth: gridW, gridHeight: gridH,
+      x: (safeWidth - gridW) / 2, y: (safeHeight - gridH) / 2,
+      previewWidth: previewW, previewHeight: previewH, previewInset: inset,
+      spacing: gap, aspectDiff: aspectDiff
+    }
 
-      var cardH = cardW / safeAspect
-      var cardArea = cardW * cardH
-      var gridW = Cmax * cardW + gap * (Cmax - 1)
-      var gridH = R * cardH + gap * (R - 1)
-      var gridAspect = gridW / gridH
-      var aspectDiff = Math.abs(gridAspect - targetAspect)
-
-      var candidate = {
-        columns: Cmax,
-        rows: R,
-        rowDistribution: dist,
-        cardWidth: cardW,
-        cardHeight: cardH,
-        cardArea: cardArea,
-        gridWidth: gridW,
-        gridHeight: gridH,
-        x: (safeWidth - gridW) / 2,
-        y: (safeHeight - gridH) / 2,
-        aspectDiff: aspectDiff
-      }
-
-      // Objective: largest common card area wins
-      if (!best || cardW > best.cardWidth + 0.001) {
-        best = candidate
-      } else if (Math.abs(cardW - best.cardWidth) <= 0.001) {
-        // Tie breakers:
-        // 1. Better screen shape match (aspectDiff)
-        // 2. Fewer rows for stable landscape layouts
-        if (candidate.aspectDiff < best.aspectDiff - 0.01) {
-          best = candidate
-        } else if (Math.abs(candidate.aspectDiff - best.aspectDiff) <= 0.01 && candidate.rows < best.rows) {
-          best = candidate
-        }
-      }
+    if (!best || previewW > best.previewWidth + 0.001
+        || (Math.abs(previewW - best.previewWidth) <= 0.001
+          && (aspectDiff < best.aspectDiff - 0.01
+            || (Math.abs(aspectDiff - best.aspectDiff) <= 0.01 && R < best.rows)))) {
+      best = candidate
     }
   }
 
-  if (!best) {
-    var fallbackDist = [safeCount]
-    var fallbackH = safeCount / safeAspect + gap * (safeCount - 1)
-    return {
-      columns: 1,
-      rows: safeCount,
-      cardWidth: 1,
-      cardHeight: 1 / safeAspect,
-      gridWidth: 1,
-      gridHeight: fallbackH,
-      x: (safeWidth - 1) / 2,
-      y: (safeHeight - fallbackH) / 2,
-      rowDistribution: fallbackDist,
-      cards: []
-    }
-  }
-
-  // Populate individual card geometries with independent row centering
+  // Equivalent permutations have identical sizing. Build just the stable,
+  // top-heavy distribution instead of enumerating exponentially many rows.
   var cards = []
+  var distribution = []
   var curY = best.y
   var cardIdx = 0
+  var base = Math.floor(safeCount / best.rows)
+  var extra = safeCount % best.rows
   for (var r = 0; r < best.rows; r++) {
-    var countInRow = best.rowDistribution[r]
+    var countInRow = base + (r < extra ? 1 : 0)
+    distribution.push(countInRow)
     var rowW = countInRow * best.cardWidth + gap * (countInRow - 1)
     var rowX = (safeWidth - rowW) / 2
     for (var c = 0; c < countInRow; c++) {
       cards.push({
-        index: cardIdx++,
-        x: rowX + c * (best.cardWidth + gap),
-        y: curY,
-        width: best.cardWidth,
-        height: best.cardHeight,
-        row: r,
-        col: c
+        index: cardIdx++, x: rowX + c * (best.cardWidth + gap), y: curY,
+        width: best.cardWidth, height: best.cardHeight, row: r, col: c
       })
     }
     curY += best.cardHeight + gap
   }
+  best.rowDistribution = distribution
   best.cards = cards
-
   return best
+}
+
+// Fit a carousel hero with neighboring cards and a compact indicator strip.
+// Optional enlargement trades neighbor visibility for preview size while keeping
+// the hero inside the viewport. All dimensions are logical; callers snap edges on
+// the destination display. Preview proportions exclude the symmetric border inset.
+function carouselGeometry(areaWidth, areaHeight, aspectRatio, options) {
+  var opts = options || {}
+  var width = Math.max(1, finiteNumber(areaWidth) || 1)
+  var height = Math.max(1, finiteNumber(areaHeight) || 1)
+  var aspect = finiteNumber(aspectRatio) > 0 ? Number(aspectRatio) : 16 / 9
+  var multiple = finiteNumber(opts.count) > 1
+  var spacing = multiple ? Math.min(Math.max(0, finiteNumber(opts.spacing) || 0), width / 10) : 0
+  var sideScale = finiteNumber(opts.sideScale) > 0 ? clamp(Number(opts.sideScale), 0.1, 1) : 0.68
+  var sideVisibility = multiple
+    ? (isFinite(finiteNumber(opts.sideVisibility)) ? clamp(Number(opts.sideVisibility), 0, 1) : 0.8) : 0
+  var indicatorHeight = multiple ? Math.min(Math.max(0, finiteNumber(opts.indicatorHeight) || 0), height / 4) : 0
+  var indicatorSpacing = indicatorHeight > 0
+    ? Math.min(Math.max(0, finiteNumber(opts.indicatorSpacing) || 0), height / 8) : 0
+  var contentHeight = height - indicatorHeight - indicatorSpacing
+  var inset = Math.min(Math.max(0, finiteNumber(opts.previewInset) || 0),
+    (width - 2 * spacing) / (4 * (1 + 2 * sideVisibility)), contentHeight / 4)
+  // Fit the hero plus two gaps and the requested visible fraction of each
+  // neighbor. Their canvas widths are sideScale * previewWidth; all cards
+  // retain the same unscaled border inset.
+  var maxPreviewWidth = (width - 2 * spacing - 2 * inset * (1 + 2 * sideVisibility))
+    / (1 + 2 * sideVisibility * sideScale)
+  var heightLimitedWidth = (contentHeight - inset * 2) * aspect
+  var sizeMultiplier = finiteNumber(opts.previewSizeMultiplier) > 0 ? Number(opts.previewSizeMultiplier) : 1
+  var previewWidth = Math.min(Math.min(maxPreviewWidth, heightLimitedWidth) * sizeMultiplier,
+    width - inset * 2, heightLimitedWidth)
+  var previewHeight = previewWidth / aspect
+  var cardWidth = previewWidth + inset * 2
+  var cardHeight = previewHeight + inset * 2
+  var sideCardWidth = previewWidth * sideScale + inset * 2
+  var peek = multiple ? Math.min(sideCardWidth, Math.max(0, (width - cardWidth) / 2 - spacing)) : 0
+  return {
+    width: width, contentHeight: contentHeight,
+    previewWidth: previewWidth, previewHeight: previewHeight, previewInset: inset,
+    cardWidth: cardWidth, cardHeight: cardHeight, sideScale: sideScale,
+    centerX: width / 2, centerY: contentHeight / 2,
+    spacing: spacing, peekWidth: peek,
+    slotDistance: (cardWidth + sideCardWidth) / 2 + spacing,
+    indicatorY: height - indicatorHeight, indicatorHeight: indicatorHeight
+  }
+}
+
+// Resize actual preview canvases during scrolling instead of transforming live
+// screencopy textures. Linear interpolation keeps adjacent cards separated.
+function carouselSlotGeometry(layout, offset) {
+  var distance = finiteNumber(offset) || 0
+  var norm = Math.abs(distance) / layout.slotDistance
+  var factor = norm <= 1
+    ? 1 - norm * (1 - layout.sideScale)
+    : Math.max(0.50, layout.sideScale - (norm - 1) * 0.18)
+  var width = layout.previewWidth * factor + layout.previewInset * 2
+  var height = layout.previewHeight * factor + layout.previewInset * 2
+  return {
+    x: layout.centerX + distance - width / 2,
+    y: layout.centerY - height / 2,
+    width: width, height: height
+  }
 }
 
 // Fit a focused workspace layout where the primary selected workspace occupies
@@ -517,6 +463,16 @@ function usableMonitorGeometry(monitor, screen) {
     logicalHeight: logical.height,
     reserved: reserved
   }
+}
+
+// Normal overview canvas proportions follow the actual desktop, including
+// reserved areas and QScreen's transformed logical monitor dimensions.
+function workspaceAspectRatio(monitor, screen) {
+  var usable = usableMonitorGeometry(monitor, screen)
+  if (usable) return usable.width / usable.height
+  var width = screen ? finiteNumber(screen.width) : 0
+  var height = screen ? finiteNumber(screen.height) : 0
+  return width > 0 && height > 0 ? width / height : 16 / 9
 }
 
 // Compute the shared uniform scale and centering offsets for a workspace.
